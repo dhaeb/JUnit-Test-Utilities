@@ -41,7 +41,7 @@ import de.kdi.junit.runners.thread.ThreadDifferenceMonitor;
  * {@link After}, {@link BeforeClass}, {@link AfterClass}, {@link Ignore},
  * {@link Test}<br/>
  * <br/>
- * The {@link Rule} annotation has not been tested together with this test
+ * Note: The {@link Rule} annotation has not been tested together with this test
  * runner.<br/>
  * 
  * @author Dan Häberlein
