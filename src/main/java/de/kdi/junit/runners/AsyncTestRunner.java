@@ -131,56 +131,24 @@ public class AsyncTestRunner extends Runner {
 			Method method = testMethods.get(i);
 			Description currentTestMethodDescription = rootDescription.getChildren().get(i);
 			Object testClassInstance = null;
+			Result result = new Result();
+			RunListener listener = result.createListener();
 			try {
-				testClassInstance = testClass.newInstance();
-				setTimeoutForMethod(method);
-				Result result = new Result();
-				RunListener listener = result.createListener();
+				testClassInstance = runTest(runNotifier, method, currentTestMethodDescription, result, listener);
+			} catch (IllegalArgumentException e) {
+				runNotifier.fireTestFailure(new Failure(currentTestMethodDescription, new IllegalArgumentException(
+						"no parameters for test methods are supported", e)));
+			} catch (InvocationTargetException e) {
+				checkForExpectedFailure(runNotifier, method, currentTestMethodDescription, e);
+			} finally {
+				runNotifier.removeListener(listener);
 				try {
-					invokeJunitMethod(testClassInstance, Before.class);
-					runNotifier.addFirstListener(listener);
-					runNotifier.fireTestStarted(currentTestMethodDescription);
-					runNotifier.addListener(listener);
-					ThreadDifferenceMonitor monitor = new ThreadDifferenceMonitor();
-					Thread monitoringThread = new Thread(monitor);
-					monitoringThread.start();
-					Thread.sleep(10);
-					method.invoke(testClassInstance);
-					Thread.sleep(10);
-					monitoringThread.interrupt();
-					Set<Thread> createdThreads = monitor.getCreatedThreads();
-					for (Thread currentThread : createdThreads) {
-						waitForFinishingThreads(currentThread);
-					}
-					Map<Long, Throwable> threadIdToExceptions = monitor.getThreadIdAndCorrespondingException();
-					switch (threadIdToExceptions.size()) {
-						case 1:
-							throw new InvocationTargetException(threadIdToExceptions.values().iterator().next());
-						default:
-							throw new InvocationTargetException(new AsynchronousTestRunnerException(threadIdToExceptions));
-						case 0:
-					}
-					runNotifier.fireTestRunFinished(result);
-					runNotifier.fireTestFinished(currentTestMethodDescription);
-				} catch (IllegalArgumentException e) {
-					runNotifier.fireTestFailure(new Failure(currentTestMethodDescription, new IllegalArgumentException(
-							"no parameters for test methods are supported", e)));
-				} catch (InvocationTargetException e) {
-					checkForExpectedFailure(runNotifier, method, currentTestMethodDescription, e);
-				} catch (Exception e) {
-					runNotifier.fireTestFailure(new Failure(currentTestMethodDescription, e));
-				} finally {
-					runNotifier.removeListener(listener);
-					try {
+					if(testClassInstance != null)
 						invokeJunitMethod(testClassInstance, After.class);
-					} catch (Exception e) {
-						e.printStackTrace();
-					}
+				} catch (Exception e) {
+					e.printStackTrace();
 				}
-			} catch (Exception e) {
-				e.printStackTrace();
 			}
-
 		}
 		callAfterClass();
 	}
@@ -193,33 +161,92 @@ public class AsyncTestRunner extends Runner {
 		}
 	}
 
+	private Object runTest(RunNotifier runNotifier, Method method, Description currentTestMethodDescription, Result result, RunListener listener)
+			throws InvocationTargetException {
+		try {
+			// fire start test
+			startTest(runNotifier, currentTestMethodDescription, listener);
+			// create Instance of Testclass
+			Object testClassInstance = testClass.newInstance();
+			setTimeoutForMethod(method);
+			invokeJunitMethod(testClassInstance, Before.class);
+			// Prepare Thread monitoring
+			ThreadDifferenceMonitor monitor = new ThreadDifferenceMonitor();
+			Thread monitoringThread = new Thread(monitor);
+			monitoringThread.start();
+			Thread.sleep(10);
+			// Invoke test method
+			method.invoke(testClassInstance);
+			Thread.sleep(10);
+			monitoringThread.interrupt();
+			// check for still running threads
+			Set<Thread> createdThreads = monitor.getCreatedThreads();
+			for (Thread currentThread : createdThreads) {
+				waitForFinishingThreads(currentThread);
+			}
+			checkForRecoredExceptions(monitor);
+			// publish test results
+			runNotifier.fireTestRunFinished(result);
+			runNotifier.fireTestFinished(currentTestMethodDescription);
+			return testClassInstance;
+		} catch (InvocationTargetException e) {
+			throw e;
+		} catch (Throwable e) {
+			throw new InvocationTargetException(e);
+		}
+	}
+
+	private void startTest(RunNotifier runNotifier, Description currentTestMethodDescription, RunListener listener) {
+		runNotifier.addFirstListener(listener);
+		runNotifier.fireTestStarted(currentTestMethodDescription);
+		runNotifier.addListener(listener);
+	}
+
 	private void setTimeoutForMethod(Method method) {
 		ThreadShutdownTimeout annotatedValue = method.getAnnotation(ThreadShutdownTimeout.class);
 		timeout = annotatedValue == null ? DEFAULT_TIMEOUT : annotatedValue.value();
 	}
 
-	private void waitForFinishingThreads(Thread currentThread) throws InterruptedException, InvocationTargetException {
-		long startTime = System.currentTimeMillis();
-		boolean hasTimeouted = false;
-		boolean hasStillRunningThreads = false;
-		while (currentThread.isAlive() && !currentThread.isDaemon() && !hasTimeouted) {
-			Thread.sleep(100);
-			hasTimeouted = System.currentTimeMillis() - startTime > timeout;
-			if (hasTimeouted) {
-				System.err.println("[ERROR] " + currentThread.toString() + " is still running! Timeout exceeded...");
-				hasStillRunningThreads = true;
+	private void waitForFinishingThreads(Thread currentThread) throws InvocationTargetException {
+		try {
+			long startTime = System.currentTimeMillis();
+			boolean hasTimeouted = false;
+			boolean hasStillRunningThreads = false;
+			while (currentThread.isAlive() && !currentThread.isDaemon() && !hasTimeouted) {
+				Thread.sleep(100);
+				hasTimeouted = System.currentTimeMillis() - startTime > timeout;
+				if (hasTimeouted) {
+					System.err.println("[ERROR] " + currentThread.toString() + " is still running! Timeout exceeded...");
+					hasStillRunningThreads = true;
+				}
 			}
-		}
-		if (hasStillRunningThreads) {
-			throw new InvocationTargetException(new ThreadsStillAliveException("Threre are threads still alive (" + currentThread + ")"));
+			if (hasStillRunningThreads) {
+				throw new ThreadsStillAliveException("Threre are threads still alive (" + currentThread + ")");
+			}
+		} catch (Exception e) {
+			throw new InvocationTargetException(e);
 		}
 	}
 
-	private void invokeJunitMethod(Object testClassInstance, Class<? extends Annotation> key) throws IllegalAccessException,
-			IllegalArgumentException, InvocationTargetException {
+	private void checkForRecoredExceptions(ThreadDifferenceMonitor monitor) throws Throwable {
+		Map<Long, Throwable> threadIdToExceptions = monitor.getThreadIdAndCorrespondingException();
+		switch (threadIdToExceptions.size()) {
+			case 1:
+				throw threadIdToExceptions.values().iterator().next();
+			default:
+				throw new AsynchronousTestRunnerException(threadIdToExceptions);
+			case 0:
+		}
+	}
+
+	private void invokeJunitMethod(Object testClassInstance, Class<? extends Annotation> key) throws InvocationTargetException {
 		if (junitBasicAnnotationMap.containsKey(key)) {
 			Method method = junitBasicAnnotationMap.get(key);
-			method.invoke(testClassInstance);
+			try {
+				method.invoke(testClassInstance);
+			} catch (Exception e) {
+				throw new InvocationTargetException(e);
+			}
 		}
 	}
 
