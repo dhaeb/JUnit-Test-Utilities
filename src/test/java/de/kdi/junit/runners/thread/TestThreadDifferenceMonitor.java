@@ -71,6 +71,7 @@ public class TestThreadDifferenceMonitor {
 		Thread.sleep(10);
 		threadToStart.start();
 		monitoringThread.interrupt();
+		monitoringThread.join();
 		Set<Thread> createdThreads = monitor.getCreatedThreads();
 		assertTrue(createdThreads.size() == 1 || createdThreads.size() == 2);
 		return monitor.getThreadIdAndCorrespondingException();

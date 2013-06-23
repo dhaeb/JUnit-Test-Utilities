@@ -179,6 +179,7 @@ public class AsyncTestRunner extends Runner {
 			method.invoke(testClassInstance);
 			Thread.sleep(10);
 			monitoringThread.interrupt();
+			monitoringThread.join();
 			// check for still running threads
 			Set<Thread> createdThreads = monitor.getCreatedThreads();
 			for (Thread currentThread : createdThreads) {
