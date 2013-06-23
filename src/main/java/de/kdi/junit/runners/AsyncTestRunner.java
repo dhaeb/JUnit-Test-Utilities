@@ -37,28 +37,34 @@ import de.kdi.junit.runners.thread.ThreadDifferenceMonitor;
  * Remember to use this class only for integration test purposes. <br/>
  * Asynchronous code could be tested much more convincing by using mocks.<br/>
  * <br/>
- * This test runner supports the normal junit annotations: 
- * {@link Before}, {@link After}, {@link BeforeClass}, {@link AfterClass}, {@link Ignore}, {@link Test}<br/> 
+ * This test runner supports the normal junit annotations: {@link Before},
+ * {@link After}, {@link BeforeClass}, {@link AfterClass}, {@link Ignore},
+ * {@link Test}<br/>
  * <br/>
- * The {@link Rule} annotation has not been tested together with this test runner.<br/>
+ * The {@link Rule} annotation has not been tested together with this test
+ * runner.<br/>
+ * 
  * @author Dan Häberlein
- *
+ * 
  */
 public class AsyncTestRunner extends Runner {
 
 	/**
-	 * Default timeout duration. 
+	 * Default timeout duration.
 	 */
 	private static final int DEFAULT_TIMEOUT = 3000;
-	
+
 	private List<Method> testMethods = new ArrayList<Method>();
 	private final Class<?> testClass;
 	private Map<Class<? extends Annotation>, Method> junitBasicAnnotationMap = new HashMap<Class<? extends Annotation>, Method>();
 	private int timeout;
 
+	private Description rootDescription;
+
 	public AsyncTestRunner(java.lang.Class<?> testClass) {
 		this.testClass = testClass;
 		Method[] classMethods = testClass.getDeclaredMethods();
+		rootDescription = Description.createSuiteDescription(testClass.getName(), testClass.getAnnotations());
 		extractTestMethods(classMethods);
 	}
 
@@ -67,12 +73,8 @@ public class AsyncTestRunner extends Runner {
 			Class<?> retClass = currentMethod.getReturnType();
 			int length = currentMethod.getParameterTypes().length;
 			int modifiers = currentMethod.getModifiers();
-			boolean isWellformedTestMethod = retClass != null && 
-											 length == 0 && 
-											 !Modifier.isStatic(modifiers) && 
-											 Modifier.isPublic(modifiers) && 
-											 !Modifier.isInterface(modifiers) && 
-											 !Modifier.isAbstract(modifiers);
+			boolean isWellformedTestMethod = retClass != null && length == 0 && !Modifier.isStatic(modifiers) && Modifier.isPublic(modifiers)
+					&& !Modifier.isInterface(modifiers) && !Modifier.isAbstract(modifiers);
 			if (isWellformedTestMethod) {
 				boolean usedForTests = addToMethodsWhenTestMethodAndNotIgnored(currentMethod);
 				if (!usedForTests) {
@@ -91,6 +93,7 @@ public class AsyncTestRunner extends Runner {
 		boolean isUsedForTests = isTestMethod && !isMethodIgnored;
 		if (isUsedForTests) {
 			testMethods.add(method);
+			rootDescription.addChild(Description.createTestDescription(method.getClass(), method.getName()));
 		}
 		return isUsedForTests;
 	}
@@ -106,11 +109,11 @@ public class AsyncTestRunner extends Runner {
 
 	private void retriveMethodWithStaticJunitAnnoation(Method currentMethod) {
 		int modifiers = currentMethod.getModifiers();
-		if(Modifier.isPublic(modifiers) && Modifier.isStatic(modifiers)) {
-			if(currentMethod.getAnnotation(BeforeClass.class) != null){
+		if (Modifier.isPublic(modifiers) && Modifier.isStatic(modifiers)) {
+			if (currentMethod.getAnnotation(BeforeClass.class) != null) {
 				junitBasicAnnotationMap.put(BeforeClass.class, currentMethod);
 			}
-			if(currentMethod.getAnnotation(AfterClass.class) != null){
+			if (currentMethod.getAnnotation(AfterClass.class) != null) {
 				junitBasicAnnotationMap.put(AfterClass.class, currentMethod);
 			}
 		}
@@ -118,8 +121,7 @@ public class AsyncTestRunner extends Runner {
 
 	@Override
 	public Description getDescription() {
-		Description spec = Description.createSuiteDescription(this.testClass.getName(), this.testClass.getAnnotations());
-		return spec;
+		return rootDescription;
 	}
 
 	@Override
@@ -127,20 +129,17 @@ public class AsyncTestRunner extends Runner {
 		callBeforeClass();
 		for (int i = 0; i < testMethods.size(); i++) {
 			Method method = testMethods.get(i);
-			Description spec = Description.createTestDescription(method.getClass(), method.getName());
-			Result result = new Result();
-			RunListener listener = result.createListener();
-			runNotifier.addFirstListener(listener);
+			Description currentTestMethodDescription = rootDescription.getChildren().get(i);
 			Object testClassInstance = null;
-				try {
-					testClassInstance = testClass.newInstance();
-				} catch (Exception e) {
-					e.printStackTrace();
-				}
-				setTimeoutForMethod(method); 
+			try {
+				testClassInstance = testClass.newInstance();
+				setTimeoutForMethod(method);
+				Result result = new Result();
+				RunListener listener = result.createListener();
 				try {
 					invokeJunitMethod(testClassInstance, Before.class);
-					runNotifier.fireTestStarted(spec);
+					runNotifier.addFirstListener(listener);
+					runNotifier.fireTestStarted(currentTestMethodDescription);
 					runNotifier.addListener(listener);
 					ThreadDifferenceMonitor monitor = new ThreadDifferenceMonitor();
 					Thread monitoringThread = new Thread(monitor);
@@ -150,23 +149,26 @@ public class AsyncTestRunner extends Runner {
 					Thread.sleep(10);
 					monitoringThread.interrupt();
 					Set<Thread> createdThreads = monitor.getCreatedThreads();
-					for(Thread currentThread : createdThreads){
+					for (Thread currentThread : createdThreads) {
 						waitForFinishingThreads(currentThread);
 					}
 					Map<Long, Throwable> threadIdToExceptions = monitor.getThreadIdAndCorrespondingException();
-					switch(threadIdToExceptions.size()){
-						case 1 :  throw new InvocationTargetException(threadIdToExceptions.values().iterator().next());
-						default : throw new InvocationTargetException(new AsynchronousTestRunnerException(threadIdToExceptions));
+					switch (threadIdToExceptions.size()) {
+						case 1:
+							throw new InvocationTargetException(threadIdToExceptions.values().iterator().next());
+						default:
+							throw new InvocationTargetException(new AsynchronousTestRunnerException(threadIdToExceptions));
 						case 0:
 					}
 					runNotifier.fireTestRunFinished(result);
-					runNotifier.fireTestFinished(spec);
+					runNotifier.fireTestFinished(currentTestMethodDescription);
 				} catch (IllegalArgumentException e) {
-					runNotifier.fireTestFailure(new Failure(spec, new IllegalArgumentException("no parameters for test methods are supported", e)));
+					runNotifier.fireTestFailure(new Failure(currentTestMethodDescription, new IllegalArgumentException(
+							"no parameters for test methods are supported", e)));
 				} catch (InvocationTargetException e) {
-					checkForExpectedFailure(runNotifier, method, spec, e);
+					checkForExpectedFailure(runNotifier, method, currentTestMethodDescription, e);
 				} catch (Exception e) {
-					runNotifier.fireTestFailure(new Failure(spec, e));
+					runNotifier.fireTestFailure(new Failure(currentTestMethodDescription, e));
 				} finally {
 					runNotifier.removeListener(listener);
 					try {
@@ -175,11 +177,14 @@ public class AsyncTestRunner extends Runner {
 						e.printStackTrace();
 					}
 				}
-			
+			} catch (Exception e) {
+				e.printStackTrace();
+			}
+
 		}
 		callAfterClass();
 	}
-	
+
 	private void callBeforeClass() {
 		try {
 			invokeJunitMethod(null, BeforeClass.class);
@@ -196,22 +201,22 @@ public class AsyncTestRunner extends Runner {
 	private void waitForFinishingThreads(Thread currentThread) throws InterruptedException, InvocationTargetException {
 		long startTime = System.currentTimeMillis();
 		boolean hasTimeouted = false;
-		boolean hasStillRunningThreads = false; 
-		while(currentThread.isAlive() && !currentThread.isDaemon() && !hasTimeouted){
+		boolean hasStillRunningThreads = false;
+		while (currentThread.isAlive() && !currentThread.isDaemon() && !hasTimeouted) {
 			Thread.sleep(100);
 			hasTimeouted = System.currentTimeMillis() - startTime > timeout;
-			if(hasTimeouted){
+			if (hasTimeouted) {
 				System.err.println("[ERROR] " + currentThread.toString() + " is still running! Timeout exceeded...");
 				hasStillRunningThreads = true;
 			}
 		}
-		if(hasStillRunningThreads){
+		if (hasStillRunningThreads) {
 			throw new InvocationTargetException(new ThreadsStillAliveException("Threre are threads still alive (" + currentThread + ")"));
 		}
 	}
 
-	private void invokeJunitMethod(Object testClassInstance, Class<? extends Annotation> key) throws IllegalAccessException, IllegalArgumentException,
-			InvocationTargetException {
+	private void invokeJunitMethod(Object testClassInstance, Class<? extends Annotation> key) throws IllegalAccessException,
+			IllegalArgumentException, InvocationTargetException {
 		if (junitBasicAnnotationMap.containsKey(key)) {
 			Method method = junitBasicAnnotationMap.get(key);
 			method.invoke(testClassInstance);
@@ -232,11 +237,11 @@ public class AsyncTestRunner extends Runner {
 			}
 		}
 	}
-	
+
 	private void callAfterClass() {
 		try {
 			invokeJunitMethod(null, AfterClass.class);
-		} catch (Exception e){
+		} catch (Exception e) {
 			e.printStackTrace();
 		}
 	}
