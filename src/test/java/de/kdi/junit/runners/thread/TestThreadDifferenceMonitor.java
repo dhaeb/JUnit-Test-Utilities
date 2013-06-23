@@ -1,6 +1,7 @@
 package de.kdi.junit.runners.thread;
 
 import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.assertFalse;
 
 import java.util.Map;
 import java.util.Set;
@@ -43,7 +44,7 @@ public class TestThreadDifferenceMonitor {
 			}
 		});
 		System.out.println("map in test: " + threadIdToThrowable);
-		assertTrue(threadIdToThrowable.size() == 1);
+		assertFalse(threadIdToThrowable.isEmpty());
 	}
 	
 	@Ignore //TODO Fix test!
