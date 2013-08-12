@@ -57,11 +57,12 @@ public class AsyncTestRunner extends Runner {
 	private static final int DEFAULT_TIMEOUT = 3000;
 
 	private List<Method> testMethods = new ArrayList<Method>();
-	private final Class<?> testClass;
 	private Map<Class<? extends Annotation>, Method> junitBasicAnnotationMap = new HashMap<Class<? extends Annotation>, Method>();
 	private int timeout;
-
 	private Description rootDescription;
+
+	private final Class<?> testClass;
+	private Object testClassInstance;
 
 	public AsyncTestRunner(java.lang.Class<?> testClass) {
 		this.testClass = testClass;
@@ -148,11 +149,13 @@ public class AsyncTestRunner extends Runner {
 		for (int i = 0; i < testMethods.size(); i++) {
 			Method method = testMethods.get(i);
 			Description currentTestMethodDescription = rootDescription.getChildren().get(i);
-			Object testClassInstance = null;
 			Result result = new Result();
 			RunListener listener = result.createListener();
 			try {
-				testClassInstance = runTest(runNotifier, method, currentTestMethodDescription, result, listener);
+				startTest(runNotifier, currentTestMethodDescription, listener);	// needed to be started already here for retrieving failures out of before method!
+				testClassInstance = tryToCreateTestClassInstance();
+				invokeJunitMethod(testClassInstance, Before.class);
+				runTest(runNotifier, method, currentTestMethodDescription, result, listener);
 			} catch (IllegalArgumentException e) {
 				runNotifier.fireTestFailure(new Failure(currentTestMethodDescription, new IllegalArgumentException(
 						"no parameters for test methods are supported", e)));
@@ -170,7 +173,7 @@ public class AsyncTestRunner extends Runner {
 		}
 		callAfterClass();
 	}
-
+	
 	private void callBeforeClass() {
 		try {
 			invokeJunitMethod(null, BeforeClass.class);
@@ -179,15 +182,18 @@ public class AsyncTestRunner extends Runner {
 		}
 	}
 
-	private Object runTest(RunNotifier runNotifier, Method method, Description currentTestMethodDescription, Result result, RunListener listener)
+	private Object tryToCreateTestClassInstance() throws InvocationTargetException {
+		try {
+			return testClass.newInstance();
+		} catch (Exception e){
+			throw new InvocationTargetException(e);
+		}
+	}
+
+	private void runTest(RunNotifier runNotifier, Method method, Description currentTestMethodDescription, Result result, RunListener listener)
 			throws InvocationTargetException {
 		try {
-			// fire start test
-			startTest(runNotifier, currentTestMethodDescription, listener);
-			// create Instance of Testclass
-			Object testClassInstance = testClass.newInstance();
 			setTimeoutForMethod(method);
-			invokeJunitMethod(testClassInstance, Before.class);
 			// Prepare Thread monitoring
 			ThreadDifferenceMonitor monitor = new ThreadDifferenceMonitor();
 			Thread monitoringThread = new Thread(monitor);
@@ -207,7 +213,6 @@ public class AsyncTestRunner extends Runner {
 			// publish test results
 			runNotifier.fireTestRunFinished(result);
 			runNotifier.fireTestFinished(currentTestMethodDescription);
-			return testClassInstance;
 		} catch (InvocationTargetException e) {
 			throw e;
 		} catch (Throwable e) {
