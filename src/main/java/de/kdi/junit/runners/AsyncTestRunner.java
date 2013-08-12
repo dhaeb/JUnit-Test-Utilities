@@ -5,6 +5,8 @@ import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -66,6 +68,22 @@ public class AsyncTestRunner extends Runner {
 		Method[] classMethods = testClass.getDeclaredMethods();
 		rootDescription = Description.createSuiteDescription(testClass.getName(), testClass.getAnnotations());
 		extractTestMethods(classMethods);
+		sortTestMethods();
+	}
+
+	private void sortTestMethods() {
+		Collections.sort(testMethods, new AscMethodNameComparator());
+	}
+
+	static class AscMethodNameComparator implements Comparator<Method> {
+
+		@Override
+		public int compare(Method comparable1, Method comparable2) {
+			String comparableMethodName1 = comparable1.getName();
+			String comparableMethodName2 = comparable2.getName();
+			return comparableMethodName1.compareTo(comparableMethodName2);
+		}
+
 	}
 
 	private void extractTestMethods(Method[] classMethods) {
@@ -143,7 +161,7 @@ public class AsyncTestRunner extends Runner {
 			} finally {
 				runNotifier.removeListener(listener);
 				try {
-					if(testClassInstance != null)
+					if (testClassInstance != null)
 						invokeJunitMethod(testClassInstance, After.class);
 				} catch (Exception e) {
 					e.printStackTrace();

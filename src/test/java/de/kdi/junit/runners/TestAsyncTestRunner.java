@@ -100,7 +100,7 @@ public class TestAsyncTestRunner {
 	}
 	
 	@ThreadShutdownTimeout(10000)
-	@Test(expected=IllegalArgumentException.class)  // will be thrown if one or more threads are still alive after the invocation of the test method 
+	@Test(expected=AsynchronousTestRunnerException.class)  // will be thrown if one or more threads are still alive after the invocation of the test method 
 	public void testMultipleThreadsAndDurationWithTSTAnnotation() throws Exception {
 		new Thread(){
 			@Override
