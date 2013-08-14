@@ -16,4 +16,5 @@ public class TestAsyncTestRunnerUsingBadConstructor {
 	public void testShouldFail() throws Exception {
 		System.out.println("hallo?");
 	}
+	
 }

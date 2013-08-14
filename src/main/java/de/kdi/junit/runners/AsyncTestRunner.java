@@ -56,10 +56,10 @@ public class AsyncTestRunner extends Runner {
 	 */
 	private static final int DEFAULT_TIMEOUT = 3000;
 
-	private List<Method> testMethods = new ArrayList<Method>();
 	private Map<Class<? extends Annotation>, Method> junitBasicAnnotationMap = new HashMap<Class<? extends Annotation>, Method>();
 	private int timeout;
 	private Description rootDescription;
+	List<Method> testMethods = new ArrayList<Method>();
 
 	private final Class<?> testClass;
 	private Object testClassInstance;
@@ -74,17 +74,36 @@ public class AsyncTestRunner extends Runner {
 
 	private void sortTestMethods() {
 		Collections.sort(testMethods, new AscMethodNameComparator());
+		Collections.sort(rootDescription.getChildren(), new AscDescriptionComparator());
 	}
 
+	static class AscDescriptionComparator implements Comparator<Description> {
+
+		@Override
+		public int compare(Description comparable1, Description comparable) {
+			return new StringComparator().compare(comparable1.getMethodName(), comparable.getMethodName());
+		}
+		
+	}
+	
 	static class AscMethodNameComparator implements Comparator<Method> {
 
 		@Override
 		public int compare(Method comparable1, Method comparable2) {
 			String comparableMethodName1 = comparable1.getName();
 			String comparableMethodName2 = comparable2.getName();
-			return comparableMethodName1.compareTo(comparableMethodName2);
+			return new StringComparator().compare(comparableMethodName1, comparableMethodName2);
 		}
 
+	}
+	
+	static class StringComparator implements Comparator<String> {
+
+		@Override
+		public int compare(String comparable1, String comparable2) {
+			return comparable1.compareTo(comparable2);
+		}
+		
 	}
 
 	private void extractTestMethods(Method[] classMethods) {
@@ -155,7 +174,7 @@ public class AsyncTestRunner extends Runner {
 				startTest(runNotifier, currentTestMethodDescription, listener);	// needed to be started already here for retrieving failures out of before method!
 				testClassInstance = tryToCreateTestClassInstance();
 				invokeJunitMethod(testClassInstance, Before.class);
-				runTest(runNotifier, method, currentTestMethodDescription, result, listener);
+				runTest(runNotifier, method, currentTestMethodDescription, result);
 			} catch (IllegalArgumentException e) {
 				runNotifier.fireTestFailure(new Failure(currentTestMethodDescription, new IllegalArgumentException(
 						"no parameters for test methods are supported", e)));
@@ -190,7 +209,7 @@ public class AsyncTestRunner extends Runner {
 		}
 	}
 
-	private void runTest(RunNotifier runNotifier, Method method, Description currentTestMethodDescription, Result result, RunListener listener)
+	private void runTest(RunNotifier runNotifier, Method method, Description currentTestMethodDescription, Result result)
 			throws InvocationTargetException {
 		try {
 			setTimeoutForMethod(method);

@@ -27,6 +27,7 @@ public class TestAsyncTestRunnerUtil {
 		assertEquals(methodB, fixture.get(1));
 	}
 	
+	
 	public void a() {}
 	
 	public void b() {}
